@@ -343,6 +343,7 @@ function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [emailAuthData, setEmailAuthData] = useState({ email: '', password: '', name: '' });
   const [authError, setAuthError] = useState<string | null>(null);
+  const [authErrorCode, setAuthErrorCode] = useState<string | null>(null);
   const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
 
   // Owner Panel State
@@ -732,11 +733,19 @@ function App() {
   const handleLogin = async () => {
     try {
       setAuthError(null);
+      setAuthErrorCode(null);
       setGoogleAuthLoading(true);
       await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
-      console.error("Google login error:", err);
-      setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
+      if (err.code === 'auth/unauthorized-domain') {
+        console.warn("Google login error:", err);
+        setAuthErrorCode('auth/unauthorized-domain');
+        setAuthError("Este dominio no está autorizado para el inicio de sesión con Google. Agrega el dominio en la consola de Firebase.");
+      } else {
+        console.error("Google login error:", err);
+        setAuthErrorCode(err.code || null);
+        setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
+      }
     } finally {
       setGoogleAuthLoading(false);
     }
@@ -745,6 +754,7 @@ function App() {
   const handleEmailAuth = async (e: React.FormEvent) => {
     e.preventDefault();
     setAuthError(null);
+    setAuthErrorCode(null);
     try {
       if (authMode === 'signup') {
         const userCredential = await createUserWithEmailAndPassword(auth, emailAuthData.email, emailAuthData.password);
@@ -756,6 +766,7 @@ function App() {
       }
     } catch (err: any) {
       console.error("Email auth error:", err);
+      setAuthErrorCode(err.code || null);
       if (err.code === 'auth/email-already-in-use') setAuthError("Este correo ya está registrado. Si usaste Google antes, intenta iniciar sesión con el botón de Google.");
       else if (err.code === 'auth/invalid-credential') setAuthError("Credenciales inválidas.");
       else if (err.code === 'auth/weak-password') setAuthError("La contraseña es muy débil.");
@@ -767,14 +778,17 @@ function App() {
   const handleResetPassword = async () => {
     if (!emailAuthData.email) {
       setAuthError("Por favor, ingresa tu correo para restablecer la contraseña.");
+      setAuthErrorCode(null);
       return;
     }
     try {
       setAuthError(null);
+      setAuthErrorCode(null);
       await sendPasswordResetEmail(auth, emailAuthData.email);
       alert("Se ha enviado un correo para restablecer tu contraseña.");
     } catch (err: any) {
       console.error("Reset password error:", err);
+      setAuthErrorCode(err.code || null);
       if (err.code === 'auth/user-not-found') setAuthError("No se encontró una cuenta con ese correo.");
       else setAuthError("Error al enviar el correo de restablecimiento.");
     }
@@ -2320,6 +2334,7 @@ function App() {
               <input 
                 type="email" 
                 required
+                autoComplete="email"
                 value={emailAuthData.email}
                 onChange={(e) => setEmailAuthData({...emailAuthData, email: e.target.value})}
                 className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-zinc-900 transition-all"
@@ -2331,6 +2346,7 @@ function App() {
               <input 
                 type="password" 
                 required
+                autoComplete={authMode === 'login' ? "current-password" : "new-password"}
                 value={emailAuthData.password}
                 onChange={(e) => setEmailAuthData({...emailAuthData, password: e.target.value})}
                 className="w-full bg-zinc-50 border border-zinc-200 rounded-xl px-4 py-3 text-sm focus:ring-2 focus:ring-zinc-900 transition-all"
@@ -2354,7 +2370,7 @@ function App() {
                 <p className="text-xs font-bold text-rose-500 bg-rose-50 p-3 rounded-xl border border-rose-100">
                   {authError}
                 </p>
-                {authError.includes("consola de Firebase") && (
+                {authErrorCode === 'auth/operation-not-allowed' && (
                   <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-200 text-[10px] text-zinc-500 leading-relaxed">
                     <p className="font-bold text-zinc-900 mb-1">Cómo habilitar el inicio de sesión:</p>
                     <ol className="list-decimal ml-3 flex flex-col gap-1">
@@ -2362,6 +2378,17 @@ function App() {
                       <li>Entra en <b>Authentication</b> &gt; <b>Sign-in method</b>.</li>
                       <li>Haz clic en <b>Add new provider</b> y elige <b>Email/Password</b>.</li>
                       <li>Activa el primer interruptor (Habilitar) y dale a <b>Guardar</b>.</li>
+                    </ol>
+                  </div>
+                )}
+                {authErrorCode === 'auth/unauthorized-domain' && (
+                  <div className="bg-zinc-50 p-3 rounded-xl border border-zinc-200 text-[10px] text-zinc-500 leading-relaxed">
+                    <p className="font-bold text-zinc-900 mb-1">Cómo autorizar el dominio en Firebase:</p>
+                    <ol className="list-decimal ml-3 flex flex-col gap-1">
+                      <li>Ve a la <a href="https://console.firebase.google.com/" target="_blank" rel="noopener noreferrer" className="text-blue-600 underline">Consola de Firebase</a>.</li>
+                      <li>Entra en <b>Authentication</b> &gt; <b>Settings</b> &gt; <b>Authorized domains</b>.</li>
+                      <li>Haz clic en <b>Add domain</b> e ingresa el dominio de tu aplicación.</li>
+                      <li>Guarda los cambios y recarga la página.</li>
                     </ol>
                   </div>
                 )}
