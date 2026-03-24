@@ -56,3 +56,15 @@ netlify login
 netlify deploy --dir=dist --prod   # production
 netlify deploy --dir=dist          # preview
 ```
+
+### Firebase: Enable Google Login on Netlify
+
+Google Login uses Firebase Authentication with a redirect flow. For it to work on your Netlify domain, you must add that domain to Firebase's **Authorized Domains** list:
+
+1. Go to the [Firebase Console](https://console.firebase.google.com/).
+2. Select your project.
+3. Navigate to **Authentication → Settings → Authorized domains**.
+4. Click **Add domain** and enter your Netlify domain (e.g. `your-site.netlify.app`).
+5. Also add any PR preview domains if needed (e.g. `pr-1--your-site.netlify.app`).
+
+> **Note:** Google login is already enabled in the Firebase project. Only the authorized domain step above is needed to make it work from Netlify.
