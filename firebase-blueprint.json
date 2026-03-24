@@ -1,0 +1,169 @@
+{
+  "entities": {
+    "User": {
+      "title": "User Profile",
+      "description": "Information about the user and their associated companies.",
+      "type": "object",
+      "properties": {
+        "uid": { "type": "string", "description": "Firebase Auth UID" },
+        "email": { "type": "string", "format": "email" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "USER"] },
+        "activeCompanyId": { "type": "string", "description": "Currently selected company context" },
+        "subscriptionId": { "type": "string", "description": "Active subscription ID" }
+      },
+      "required": ["uid", "email", "role"]
+    },
+    "Plan": {
+      "title": "Subscription Plan",
+      "description": "Available subscription tiers for the SaaS.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "name": { "type": "string" },
+        "price": { "type": "number" },
+        "invoiceLimit": { "type": "integer" },
+        "companyLimit": { "type": "integer" },
+        "features": { "type": "array", "items": { "type": "string" } }
+      },
+      "required": ["id", "name", "price", "invoiceLimit", "companyLimit"]
+    },
+    "Subscription": {
+      "title": "User Subscription",
+      "description": "Active subscription details for a user.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "userId": { "type": "string" },
+        "planId": { "type": "string" },
+        "status": { "type": "string", "enum": ["active", "canceled", "past_due", "trialing"] },
+        "startDate": { "type": "string", "format": "date-time" },
+        "endDate": { "type": "string", "format": "date-time" },
+        "stripeSubscriptionId": { "type": "string" }
+      },
+      "required": ["id", "userId", "planId", "status", "startDate", "endDate"]
+    },
+    "SystemLog": {
+      "title": "System Log",
+      "description": "Logs for auditing and monitoring.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "level": { "type": "string", "enum": ["INFO", "WARN", "ERROR"] },
+        "message": { "type": "string" },
+        "details": { "type": "string" },
+        "userId": { "type": "string" }
+      },
+      "required": ["id", "timestamp", "level", "message"]
+    },
+    "DgiiResponse": {
+      "title": "DGII Response",
+      "description": "Responses from the DGII for e-CF submissions.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "invoiceId": { "type": "string" },
+        "timestamp": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["ACCEPTED", "REJECTED", "ERROR"] },
+        "message": { "type": "string" },
+        "xmlResponse": { "type": "string" }
+      },
+      "required": ["id", "invoiceId", "timestamp", "status", "message"]
+    },
+    "RevenueMetric": {
+      "title": "Revenue Metric",
+      "description": "Aggregated revenue data for the owner dashboard.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "date": { "type": "string", "format": "date" },
+        "amount": { "type": "number" },
+        "currency": { "type": "string" }
+      },
+      "required": ["id", "date", "amount", "currency"]
+    },
+    "Certificate": {
+      "title": "DGII Certificate",
+      "description": "Digital certificates for signing e-CF.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyId": { "type": "string" },
+        "expirationDate": { "type": "string", "format": "date-time" },
+        "status": { "type": "string", "enum": ["ACTIVE", "EXPIRED", "REVOKED"] },
+        "thumbprint": { "type": "string" }
+      },
+      "required": ["id", "companyId", "expirationDate", "status", "thumbprint"]
+    },
+    "Company": {
+      "title": "Company (RNC)",
+      "description": "A business entity registered for electronic invoicing.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "rnc": { "type": "string", "description": "Registro Nacional de Contribuyente" },
+        "name": { "type": "string" },
+        "type": { "type": "string", "enum": ["FISICA", "JURIDICA"] },
+        "ownerUid": { "type": "string", "description": "UID of the user who owns this company" },
+        "digitalSignatureThumbprint": { "type": "string", "description": "Reference to the digital signature" }
+      },
+      "required": ["rnc", "name", "type", "ownerUid"]
+    },
+    "Invoice": {
+      "title": "Electronic Invoice (e-CF)",
+      "description": "An electronic fiscal document compliant with DGII standards.",
+      "type": "object",
+      "properties": {
+        "id": { "type": "string" },
+        "companyId": { "type": "string", "description": "Issuer company ID" },
+        "ecf": { "type": "string", "description": "Electronic Fiscal Sequence (e-NCF)" },
+        "customerRnc": { "type": "string" },
+        "customerName": { "type": "string" },
+        "date": { "type": "string", "format": "date-time" },
+        "total": { "type": "number" },
+        "status": { "type": "string", "enum": ["PENDING", "SIGNED", "ACCEPTED", "REJECTED"] },
+        "xmlUrl": { "type": "string", "description": "URL to the signed XML in storage" }
+      },
+      "required": ["companyId", "ecf", "total", "status"]
+    }
+  },
+  "firestore": {
+    "/users/{uid}": {
+      "schema": "User",
+      "description": "User profiles"
+    },
+    "/companies/{companyId}": {
+      "schema": "Company",
+      "description": "Registered companies"
+    },
+    "/companies/{companyId}/invoices/{invoiceId}": {
+      "schema": "Invoice",
+      "description": "Invoices issued by a specific company"
+    },
+    "/plans/{planId}": {
+      "schema": "Plan",
+      "description": "Subscription plans"
+    },
+    "/subscriptions/{subscriptionId}": {
+      "schema": "Subscription",
+      "description": "User subscriptions"
+    },
+    "/system_logs/{logId}": {
+      "schema": "SystemLog",
+      "description": "System audit logs"
+    },
+    "/dgii_responses/{responseId}": {
+      "schema": "DgiiResponse",
+      "description": "DGII communication logs"
+    },
+    "/revenue_metrics/{metricId}": {
+      "schema": "RevenueMetric",
+      "description": "Revenue data"
+    },
+    "/certificates/{certificateId}": {
+      "schema": "Certificate",
+      "description": "DGII digital certificates"
+    }
+  }
+}

@@ -1,0 +1,241 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ===============================================================
+    // Assumed Data Model
+    // ===============================================================
+    //
+    // Collection: /users/{uid}
+    // Fields:
+    //   - uid: string (required)
+    //   - email: string (required)
+    //   - name: string
+    //   - role: string (PLATFORM_ADMIN/COMPANY_ADMIN/EMPLOYEE)
+    //   - activeCompanyId: string
+    //   - companyIds: list (for employees)
+    //   - ownerId: string (for employees, points to boss)
+    //
+    // Collection: /companies/{companyId}
+    // Fields:
+    //   - id: string
+    //   - rnc: string (required)
+    //   - name: string (required)
+    //   - type: string (FISICA/JURIDICA)
+    //   - ownerId: string (required)
+    //
+    // Collection: /companies/{companyId}/invoices/{invoiceId}
+    // Fields:
+    //   - id: string
+    //   - companyId: string
+    //   - ecf: string
+    //   - total: number
+    //   - status: string (PENDING/SIGNED/ACCEPTED/REJECTED)
+    //
+    // ===============================================================
+
+    // Helper Functions
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isAuthenticated() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isAuthenticated() && 
+        ((exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'PLATFORM_ADMIN') ||
+         (request.auth.token.email.lower() == "jeremyagnz@gmail.com" && request.auth.token.email_verified == true));
+    }
+
+    function isCompanyOwner(companyId) {
+      let companyPath = /databases/$(database)/documents/companies/$(companyId);
+      return isAuthenticated() && exists(companyPath) && (get(companyPath).data.ownerId == request.auth.uid || get(companyPath).data.ownerUid == request.auth.uid);
+    }
+
+    function isCompanyAdmin(companyId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isAuthenticated() && exists(userPath) && get(userPath).data.role == 'COMPANY_ADMIN' && (get(userPath).data.companyIds.hasAny([companyId]) || get(userPath).data.activeCompanyId == companyId);
+    }
+
+    function isEmployee(companyId) {
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return isAuthenticated() && exists(userPath) && (get(userPath).data.role in ['COMPANY_ADMIN', 'INVOICE_EDITOR', 'READ_ONLY']) && (get(userPath).data.companyIds.hasAny([companyId]) || get(userPath).data.activeCompanyId == companyId);
+    }
+
+    function isInvoiceEditor(companyId) {
+      let userDoc = get(/databases/$(database)/documents/users/$(request.auth.uid));
+      return isAuthenticated() && userDoc != null && userDoc.data.role == 'INVOICE_EDITOR' && userDoc.data.companyIds.hasAny([companyId]);
+    }
+
+    function isAuthorized(companyId) {
+      return isAdmin() || isCompanyOwner(companyId) || isCompanyAdmin(companyId) || isEmployee(companyId);
+    }
+
+    function isValidPlan(data) {
+      return data.keys().hasAll(['id', 'name', 'price', 'invoiceLimit', 'companyLimit']) &&
+             data.id is string && data.name is string && data.price is number &&
+             data.invoiceLimit is int && data.companyLimit is int;
+    }
+
+    function isValidUser(data) {
+      return data.keys().hasAll(['uid', 'email', 'role']) &&
+             data.uid is string && data.uid.size() < 128 &&
+             data.email is string && data.email.size() < 100 &&
+             data.role in ['PLATFORM_ADMIN', 'COMPANY_ADMIN', 'INVOICE_EDITOR', 'READ_ONLY'] &&
+             (!('name' in data) || (data.name is string && data.name.size() < 100)) &&
+             data.keys().hasOnly(['uid', 'email', 'name', 'role', 'activeCompanyId', 'companyIds', 'ownerId', 'subscriptionId']);
+    }
+
+    function isRoleChangeAllowed(oldRole, newRole, uid) {
+      // Only PLATFORM_ADMIN can set PLATFORM_ADMIN
+      // Only PLATFORM_ADMIN or COMPANY_ADMIN can set COMPANY_ADMIN
+      // Allow new users to set themselves as COMPANY_ADMIN if they are the owner
+      let userPath = /databases/$(database)/documents/users/$(request.auth.uid);
+      return (newRole == oldRole) || 
+             (newRole == 'PLATFORM_ADMIN' && isAdmin()) ||
+             (newRole == 'COMPANY_ADMIN' && (isAdmin() || isOwner(uid) || (isAuthenticated() && exists(userPath) && get(userPath).data.role == 'COMPANY_ADMIN'))) ||
+             (newRole in ['INVOICE_EDITOR', 'READ_ONLY']);
+    }
+
+    function isValidCompany(data) {
+      return data.keys().hasAll(['rnc', 'name', 'type', 'ownerId']) &&
+             data.rnc is string && data.rnc.size() >= 9 && data.rnc.size() <= 11 &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.type in ['FISICA', 'JURIDICA'] &&
+             data.ownerId is string &&
+             data.keys().hasOnly(['id', 'rnc', 'name', 'type', 'logo', 'certificate', 'privateKey', 'ownerId']);
+    }
+
+    function isValidSubscription(data) {
+      return data.keys().hasAll(['id', 'userId', 'planId', 'status', 'startDate', 'endDate', 'invoiceCount', 'companyCount', 'autoRenew']) &&
+             data.id is string && data.userId is string && data.planId is string &&
+             data.status in ['ACTIVE', 'active', 'canceled', 'past_due', 'trialing'] &&
+             data.startDate is string && data.endDate is string &&
+             data.invoiceCount is int && data.companyCount is int && data.autoRenew is bool &&
+             data.keys().hasOnly(['id', 'userId', 'planId', 'status', 'startDate', 'endDate', 'stripeSubscriptionId', 'invoiceCount', 'companyCount', 'autoRenew']);
+    }
+
+    function isValidInvoice(data, companyId) {
+      return data.keys().hasAll(['companyId', 'ecf', 'total', 'status', 'type', 'customerRnc', 'customerName', 'date', 'subtotal', 'itbis', 'items']) &&
+             data.companyId == companyId &&
+             data.ecf is string && data.ecf.size() > 0 &&
+             data.total is number &&
+             data.status in ['PENDING', 'SIGNED', 'ACCEPTED', 'REJECTED', 'CONTINGENCY'] &&
+             data.type is string &&
+             data.customerRnc is string &&
+             data.customerName is string &&
+             data.date is string &&
+             data.subtotal is number &&
+             data.itbis is number &&
+             data.items is list &&
+             data.keys().hasOnly(['id', 'companyId', 'ecf', 'type', 'customerRnc', 'customerName', 'date', 'subtotal', 'itbis', 'total', 'status', 'signedXml', 'trackId', 'dgiiMessage', 'items']);
+    }
+
+    function isValidCustomer(data, companyId) {
+      return data.keys().hasAll(['companyId', 'name', 'rnc']) &&
+             data.keys().hasOnly(['id', 'companyId', 'name', 'rnc', 'email']) &&
+             data.companyId == companyId &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.rnc is string && data.rnc.size() >= 9 && data.rnc.size() <= 11 &&
+             (!('email' in data) || (data.email is string && (data.email.size() == 0 || (data.email.size() > 0 && data.email.size() < 100))));
+    }
+
+    function isValidProduct(data) {
+      return data.keys().hasAll(['companyId', 'name', 'price', 'itbis', 'category', 'unit']) &&
+             data.companyId is string &&
+             data.name is string && data.name.size() > 0 && data.name.size() < 100 &&
+             data.price is number &&
+             data.itbis is int &&
+             data.category is string &&
+             data.unit is string;
+    }
+
+    // Rules
+    match /users/{uid} {
+      allow read: if isOwner(uid) || isAdmin() || (isAuthenticated() && (
+        uid == request.auth.token.email ||
+        (resource != null && resource.data.email == request.auth.token.email) ||
+        (resource != null && resource.data.ownerId == request.auth.uid) ||
+        (exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId == uid)
+      ));
+      allow create: if (isOwner(uid) || isAdmin() || (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'COMPANY_ADMIN')) 
+                    && isValidUser(request.resource.data)
+                    && isRoleChangeAllowed('READ_ONLY', request.resource.data.role, uid)
+                    && (isAdmin() || 
+                        (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'COMPANY_ADMIN') || 
+                        request.resource.data.companyIds.size() == 0 || 
+                        (exists(/databases/$(database)/documents/users/$(request.auth.token.email)) && request.resource.data.companyIds == get(/databases/$(database)/documents/users/$(request.auth.token.email)).data.companyIds));
+      allow update: if (isOwner(uid) || isAdmin() || 
+                        (isAuthenticated() && (!('ownerId' in resource.data) || resource.data.ownerId == request.auth.uid) && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'COMPANY_ADMIN') || 
+                        (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.ownerId == uid)) 
+                    && isValidUser(request.resource.data)
+                    && isRoleChangeAllowed(resource.data.role, request.resource.data.role, uid)
+                    && (isAdmin() || 
+                        (isAuthenticated() && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'COMPANY_ADMIN') || 
+                        request.resource.data.companyIds == resource.data.companyIds);
+      allow delete: if isOwner(uid) || isAdmin() || (isAuthenticated() && uid == request.auth.token.email) || (isAuthenticated() && resource.data.ownerId == request.auth.uid && exists(/databases/$(database)/documents/users/$(request.auth.uid)) && get(/databases/$(database)/documents/users/$(request.auth.uid)).data.role == 'COMPANY_ADMIN');
+    }
+
+    match /plans/{planId} {
+      allow read: if true;
+      allow write: if isAdmin();
+    }
+
+    match /subscriptions/{subscriptionId} {
+      allow read: if isAuthenticated() && (resource.data.userId == request.auth.uid || isAdmin());
+      allow create: if isAuthenticated() && request.resource.data.userId == request.auth.uid && isValidSubscription(request.resource.data);
+      allow update: if isAdmin();
+    }
+
+    match /system_logs/{logId} {
+      allow read: if isAdmin() || (isAuthenticated() && resource.data.companyId != null && isAuthorized(resource.data.companyId));
+      allow create: if isAuthenticated();
+    }
+
+    match /dgii_responses/{responseId} {
+      allow read: if isAdmin();
+      allow create: if isAdmin();
+    }
+
+    match /revenue_metrics/{metricId} {
+      allow read: if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    match /certificates/{certificateId} {
+      allow read: if isAdmin() || isCompanyOwner(resource.data.companyId) || isCompanyAdmin(resource.data.companyId);
+      allow write: if isAdmin();
+    }
+
+    match /products/{productId} {
+      allow read: if isAuthenticated() && (isAdmin() || isAuthorized(resource.data.companyId));
+      allow create: if isAuthenticated() && (isAdmin() || isCompanyOwner(request.resource.data.companyId) || isCompanyAdmin(request.resource.data.companyId) || isInvoiceEditor(request.resource.data.companyId)) && isValidProduct(request.resource.data);
+      allow update: if isAuthenticated() && (isAdmin() || isCompanyOwner(resource.data.companyId) || isCompanyAdmin(resource.data.companyId) || isInvoiceEditor(resource.data.companyId)) && isValidProduct(request.resource.data);
+      allow delete: if isAuthenticated() && (isAdmin() || isCompanyOwner(resource.data.companyId) || isCompanyAdmin(resource.data.companyId));
+    }
+
+    match /companies/{companyId} {
+      allow read: if isAuthorized(companyId);
+      allow create: if isAuthenticated() && isValidCompany(request.resource.data);
+      allow update: if (isCompanyOwner(companyId) || isCompanyAdmin(companyId)) && isValidCompany(request.resource.data);
+      
+      match /invoices/{invoiceId} {
+        allow read: if isAuthorized(companyId);
+        allow create: if (isAdmin() || isCompanyOwner(companyId) || isCompanyAdmin(companyId) || isInvoiceEditor(companyId)) && isValidInvoice(request.resource.data, companyId);
+        allow update: if (isAdmin() || isCompanyOwner(companyId) || isCompanyAdmin(companyId) || isInvoiceEditor(companyId)) && isValidInvoice(request.resource.data, companyId);
+      }
+
+      match /customers/{customerId} {
+        allow read: if isAuthorized(companyId);
+        allow create: if (isAdmin() || isCompanyOwner(companyId) || isCompanyAdmin(companyId) || isInvoiceEditor(companyId)) && isValidCustomer(request.resource.data, companyId);
+        allow update: if (isAdmin() || isCompanyOwner(companyId) || isCompanyAdmin(companyId) || isInvoiceEditor(companyId)) && isValidCustomer(request.resource.data, companyId);
+      }
+    }
+
+    match /test/connection {
+      allow read: if true;
+    }
+  }
+}

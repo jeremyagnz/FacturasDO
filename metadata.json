@@ -1,0 +1,5 @@
+{
+  "name": "FacturaDO",
+  "description": "SaaS de Facturación Electrónica para República Dominicana (e-CF DGII). Soporte multi-RNC, firma digital e integración con DGII.",
+  "requestFramePermissions": ["camera"]
+}
