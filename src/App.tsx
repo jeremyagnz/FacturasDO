@@ -52,8 +52,7 @@ import {
   auth, 
   db, 
   googleProvider, 
-  signInWithRedirect,
-  getRedirectResult,
+  signInWithPopup,
   signOut, 
   onAuthStateChanged, 
   createUserWithEmailAndPassword,
@@ -402,22 +401,6 @@ function App() {
     };
   }, []);
 
-  // Handle Google redirect result after returning from the Google sign-in page
-  useEffect(() => {
-    getRedirectResult(auth)
-      .then((result) => {
-        if (result?.user) {
-          setAuthError(null);
-        }
-      })
-      .catch((err: any) => {
-        if (err.code !== 'auth/no-auth-event') {
-          console.error("Google redirect error:", err);
-          setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
-        }
-      });
-  }, []);
-
   // Sync User Profile & Companies
   const syncUserProfile = async (fbUser: FirebaseUser) => {
     try {
@@ -750,10 +733,11 @@ function App() {
     try {
       setAuthError(null);
       setGoogleAuthLoading(true);
-      await signInWithRedirect(auth, googleProvider);
+      await signInWithPopup(auth, googleProvider);
     } catch (err: any) {
       console.error("Google login error:", err);
       setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
+    } finally {
       setGoogleAuthLoading(false);
     }
   };
@@ -2412,7 +2396,7 @@ function App() {
               ) : (
                 <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
               )}
-              {googleAuthLoading ? 'Redirigiendo...' : 'Google'}
+              {googleAuthLoading ? 'Cargando...' : 'Google'}
             </button>
             <button 
               onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}
