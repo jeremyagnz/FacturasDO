@@ -52,7 +52,8 @@ import {
   auth, 
   db, 
   googleProvider, 
-  signInWithPopup, 
+  signInWithRedirect,
+  getRedirectResult,
   signOut, 
   onAuthStateChanged, 
   createUserWithEmailAndPassword,
@@ -343,6 +344,7 @@ function App() {
   const [authMode, setAuthMode] = useState<'login' | 'signup'>('login');
   const [emailAuthData, setEmailAuthData] = useState({ email: '', password: '', name: '' });
   const [authError, setAuthError] = useState<string | null>(null);
+  const [googleAuthLoading, setGoogleAuthLoading] = useState(false);
 
   // Owner Panel State
   const [allUsers, setAllUsers] = useState<User[]>([]);
@@ -398,6 +400,22 @@ function App() {
       companiesUnsubscribeRef.current.forEach(unsub => unsub());
       companiesUnsubscribeRef.current = [];
     };
+  }, []);
+
+  // Handle Google redirect result after returning from the Google sign-in page
+  useEffect(() => {
+    getRedirectResult(auth)
+      .then((result) => {
+        if (result?.user) {
+          setAuthError(null);
+        }
+      })
+      .catch((err: any) => {
+        if (err.code !== 'auth/no-auth-event') {
+          console.error("Google redirect error:", err);
+          setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
+        }
+      });
   }, []);
 
   // Sync User Profile & Companies
@@ -731,15 +749,12 @@ function App() {
   const handleLogin = async () => {
     try {
       setAuthError(null);
-      await signInWithPopup(auth, googleProvider);
+      setGoogleAuthLoading(true);
+      await signInWithRedirect(auth, googleProvider);
     } catch (err: any) {
-      if (err.code === 'auth/popup-closed-by-user') {
-        console.warn("Login popup closed by user");
-        setAuthError("La ventana de inicio de sesión se cerró antes de completar el proceso.");
-      } else {
-        console.error("Login error:", err);
-        setAuthError("Error al iniciar sesión con Google.");
-      }
+      console.error("Google login error:", err);
+      setAuthError("Error al iniciar sesión con Google. Intenta de nuevo.");
+      setGoogleAuthLoading(false);
     }
   };
 
@@ -2386,10 +2401,18 @@ function App() {
           <div className="flex flex-col gap-3">
             <button 
               onClick={handleLogin}
-              className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-200 py-3.5 rounded-2xl font-semibold text-zinc-700 hover:bg-zinc-50 transition-all shadow-sm"
+              disabled={googleAuthLoading}
+              className="w-full flex items-center justify-center gap-3 bg-white border border-zinc-200 py-3.5 rounded-2xl font-semibold text-zinc-700 hover:bg-zinc-50 transition-all shadow-sm disabled:opacity-60 disabled:cursor-not-allowed"
             >
-              <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
-              Google
+              {googleAuthLoading ? (
+                <svg className="animate-spin w-5 h-5 text-zinc-500" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+                </svg>
+              ) : (
+                <img src="https://www.google.com/favicon.ico" className="w-5 h-5" alt="Google" />
+              )}
+              {googleAuthLoading ? 'Redirigiendo...' : 'Google'}
             </button>
             <button 
               onClick={() => setAuthMode(authMode === 'login' ? 'signup' : 'login')}

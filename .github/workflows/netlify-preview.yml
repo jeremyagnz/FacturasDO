@@ -1,0 +1,55 @@
+name: Netlify Preview Deploy
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+
+jobs:
+  preview:
+    name: Deploy Preview to Netlify
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build project
+        run: npm run build
+        env:
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+
+      - name: Deploy preview to Netlify
+        id: netlify_deploy
+        uses: netlify/actions/cli@master
+        with:
+          args: deploy --dir=dist --alias=pr-${{ github.event.pull_request.number }}
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+
+      - name: Comment preview URL on PR
+        if: success()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const url = `https://pr-${{ github.event.pull_request.number }}--${{ vars.NETLIFY_SITE_NAME }}.netlify.app`;
+            const body = `## 🚀 Netlify Preview Deploy\n\n| | |\n|---|---|\n| **Preview URL** | ${url} |\n| **Commit** | ${{ github.sha }} |\n| **Branch** | \`${{ github.head_ref }}\` |`;
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body
+            });
